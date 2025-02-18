@@ -147,6 +147,7 @@ class Threading(SingleArmEnv_MG):
         use_object_obs=True,
         reward_scale=1.0,
         reward_shaping=False,
+        placement_initializer=None,
         has_renderer=False,
         has_offscreen_renderer=True,
         render_camera="frontview",
@@ -176,6 +177,8 @@ class Threading(SingleArmEnv_MG):
 
         # whether to use ground-truth object states
         self.use_object_obs = use_object_obs
+
+        self.placement_initializer = placement_initializer
 
         super().__init__(
             robots=robots,
@@ -306,35 +309,40 @@ class Threading(SingleArmEnv_MG):
     def _get_placement_initializer(self):
         bounds = self._get_initial_placement_bounds()
 
-        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
-        self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
-                name="NeedleSampler",
-                mujoco_objects=self.needle,
-                x_range=bounds["needle"]["x"],
-                y_range=bounds["needle"]["y"],
-                rotation=bounds["needle"]["z_rot"],
-                rotation_axis='z',
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=bounds["needle"]["reference"],
-                z_offset=0.,
+        if self.placement_initializer is None:
+            self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name="NeedleSampler",
+                    mujoco_objects=None,
+                    x_range=bounds["needle"]["x"],
+                    y_range=bounds["needle"]["y"],
+                    rotation=bounds["needle"]["z_rot"],
+                    rotation_axis='z',
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=bounds["needle"]["reference"],
+                    z_offset=0.,
+                )
             )
-        )
-        self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
-                name="TripodSampler",
-                mujoco_objects=self.tripod,
-                x_range=bounds["tripod"]["x"],
-                y_range=bounds["tripod"]["y"],
-                rotation=bounds["tripod"]["z_rot"],
-                rotation_axis='z',
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=bounds["tripod"]["reference"],
-                z_offset=0.001,
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name="TripodSampler",
+                    mujoco_objects=None,
+                    x_range=bounds["tripod"]["x"],
+                    y_range=bounds["tripod"]["y"],
+                    rotation=bounds["tripod"]["z_rot"],
+                    rotation_axis='z',
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=bounds["tripod"]["reference"],
+                    z_offset=0.001,
+                )
             )
-        )
+
+        self.placement_initializer.reset()
+        self.placement_initializer.add_objects_to_sampler(sampler_name="NeedleSampler", mujoco_objects=self.needle)
+        self.placement_initializer.add_objects_to_sampler(sampler_name="TripodSampler", mujoco_objects=self.tripod)
 
     def _setup_references(self):
         """

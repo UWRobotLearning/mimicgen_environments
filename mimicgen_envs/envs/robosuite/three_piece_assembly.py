@@ -150,6 +150,7 @@ class ThreePieceAssembly(SingleArmEnv_MG):
         use_object_obs=True,
         reward_scale=1.0,
         reward_shaping=False,
+        placement_initializer=None,
         has_renderer=False,
         has_offscreen_renderer=True,
         render_camera="frontview",
@@ -179,6 +180,8 @@ class ThreePieceAssembly(SingleArmEnv_MG):
 
         # whether to use ground-truth object states
         self.use_object_obs = use_object_obs
+        
+        self.placement_initializer = placement_initializer
 
         super().__init__(
             robots=robots,
@@ -237,6 +240,11 @@ class ThreePieceAssembly(SingleArmEnv_MG):
             float: reward value
         """
         reward = 0.
+        
+        piece_1_pos = np.array(self.sim.data.body_xpos[self.obj_body_id["piece_1"]])
+        # top right recovery reward
+        goal = np.array([-0.18, 0.18, 0.85])
+        reward += -(np.linalg.norm(piece_1_pos - goal))
 
         # sparse completion reward
         if self._check_success():
@@ -460,53 +468,55 @@ class ThreePieceAssembly(SingleArmEnv_MG):
 
     def _get_placement_initializer(self):
         bounds = self._get_initial_placement_bounds()
-
-        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
-        self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
-                name="BaseSampler",
-                mujoco_objects=self.base,
-                x_range=bounds["base"]["x"],
-                y_range=bounds["base"]["y"],
-                rotation=bounds["base"]["z_rot"],
-                rotation_axis='z',
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=bounds["base"]["reference"],
-                # z_offset=0.,
-                z_offset=0.001,
+        if self.placement_initializer is None:
+            self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name="BaseSampler",
+                    x_range=bounds["base"]["x"],
+                    y_range=bounds["base"]["y"],
+                    rotation=bounds["base"]["z_rot"],
+                    rotation_axis='z',
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=bounds["base"]["reference"],
+                    # z_offset=0.,
+                    z_offset=0.001,
+                )
             )
-        )
-        self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
-                name="Piece1Sampler",
-                mujoco_objects=self.piece_1,
-                x_range=bounds["piece_1"]["x"],
-                y_range=bounds["piece_1"]["y"],
-                rotation=bounds["piece_1"]["z_rot"],
-                rotation_axis='z',
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=bounds["piece_1"]["reference"],
-                # z_offset=0.,
-                z_offset=0.001,
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name="Piece1Sampler",
+                    x_range=bounds["piece_1"]["x"],
+                    y_range=bounds["piece_1"]["y"],
+                    rotation=bounds["piece_1"]["z_rot"],
+                    rotation_axis='z',
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=bounds["piece_1"]["reference"],
+                    # z_offset=0.,
+                    z_offset=0.001,
+                )
             )
-        )
-        self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
-                name="Piece2Sampler",
-                mujoco_objects=self.piece_2,
-                x_range=bounds["piece_2"]["x"],
-                y_range=bounds["piece_2"]["y"],
-                rotation=bounds["piece_2"]["z_rot"],
-                rotation_axis='z',
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=bounds["piece_2"]["reference"],
-                # z_offset=0.,
-                z_offset=0.001,
+            self.placement_initializer.append_sampler(
+                sampler=UniformRandomSampler(
+                    name="Piece2Sampler",
+                    x_range=bounds["piece_2"]["x"],
+                    y_range=bounds["piece_2"]["y"],
+                    rotation=bounds["piece_2"]["z_rot"],
+                    rotation_axis='z',
+                    ensure_object_boundary_in_range=False,
+                    ensure_valid_placement=True,
+                    reference_pos=bounds["piece_2"]["reference"],
+                    # z_offset=0.,
+                    z_offset=0.001,
+                )
             )
-        )
+        self.placement_initializer.reset()
+        self.placement_initializer.add_objects_to_sampler(sampler_name="BaseSampler", mujoco_objects=self.base)
+        self.placement_initializer.add_objects_to_sampler(sampler_name="Piece1Sampler", mujoco_objects=self.piece_1 )
+        if 'Piece2Sampler' in self.placement_initializer.samplers:
+            self.placement_initializer.add_objects_to_sampler(sampler_name="Piece2Sampler", mujoco_objects=self.piece_2)
 
     def _setup_references(self):
         """
@@ -573,18 +583,20 @@ class ThreePieceAssembly(SingleArmEnv_MG):
             sensors += [eef_control_frame_pose]
             names += ["eef_control_frame_pose"]
             actives += [False]
-
+            
             # add ground-truth poses (absolute and relative to eef) for all objects
             for obj_name in self.obj_body_id:
+                if obj_name in ['base', 'piece_2']:
+                    continue
                 obj_sensors, obj_sensor_names = self._create_obj_sensors(obj_name=obj_name, modality=modality)
                 sensors += obj_sensors
                 names += obj_sensor_names
                 actives += [True] * len(obj_sensors)
-
-            obj_centric_sensors, obj_centric_sensor_names = self._create_obj_centric_sensors(modality="object_centric")
-            sensors += obj_centric_sensors
-            names += obj_centric_sensor_names
-            actives += [True] * len(obj_centric_sensors)
+                
+            # obj_centric_sensors, obj_centric_sensor_names = self._create_obj_centric_sensors(modality="object_centric")
+            # sensors += obj_centric_sensors
+            # names += obj_centric_sensor_names
+            # actives += [True] * len(obj_centric_sensors)
 
             # Create observables
             for name, s, active in zip(names, sensors, actives):
